@@ -18,6 +18,7 @@ import {
 import {Colors} from 'react-native/Libraries/NewAppScreen';
 import RNLocation from 'react-native-location';
 import ReactNativeForegroundService from '@supersami/rn-foreground-service';
+import PushNotification from 'react-native-push-notification';
 import MapView, {Marker} from 'react-native-maps';
 import {getDistance} from 'geolib';
 import Markers from './Markers';
@@ -453,11 +454,25 @@ class App extends React.Component {
           distanceToRadar < this.state.lastDistanceToRadar ||
           this.state.lastDistanceToRadar === null
         ) {
-          ReactNativeForegroundService.update({
+          /*ReactNativeForegroundService.update({
             id: 144,
             title: 'Speeding',
             message: `Радар через ${distanceToRadar} м`,
-          });
+          });*/
+
+          setTimeout(() => {
+            PushNotification.localNotification({
+              channelId: 'rn-push-notification-channel-id-ding-4-300',
+              autoCancel: true,
+              subText: 'Будьте внимательны',
+              title: 'Speeding',
+              message: `Радар через ${distanceToRadar} м`,
+              vibrate: true,
+              vibration: 300,
+              playSound: true,
+              soundName: 'ding',
+            });
+          }, 1000);
         }
 
         this.setState({
@@ -483,103 +498,129 @@ class App extends React.Component {
   }
 
   async componentDidMount() {
-    if (ReactNativeForegroundService.is_task_running(144)) {
-      return;
-    }
+    try {
+      if (ReactNativeForegroundService.is_task_running(144)) {
+        return;
+      }
 
-    const backgroundgranted = await PermissionsAndroid.request(
-      PermissionsAndroid.PERMISSIONS.ACCESS_BACKGROUND_LOCATION,
-      {
-        title: 'Background Location Permission',
-        message:
-          'We need access to your location ' +
-          'so you can get live quality updates.',
-        buttonNeutral: 'Ask Me Later',
-        buttonNegative: 'Cancel',
-        buttonPositive: 'OK',
-      },
-    );
+      const backgroundgranted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.ACCESS_BACKGROUND_LOCATION,
+        {
+          title: 'Background Location Permission',
+          message:
+            'We need access to your location ' +
+            'so you can get live quality updates.',
+          buttonNeutral: 'Ask Me Later',
+          buttonNegative: 'Cancel',
+          buttonPositive: 'OK',
+        },
+      );
 
-    RNLocation.configure({
-      distanceFilter: 1, // Meters
-      desiredAccuracy: {
-        ios: 'best',
-        android: 'highAccuracy',
-      },
-      // Android only
-      androidProvider: 'auto',
-      interval: 1000, // Milliseconds
-      fastestInterval: 500, // Milliseconds
-      maxWaitTime: 0, // Milliseconds
-    });
-    let locationSubscription = null;
-    let locationTimeout = null;
+      RNLocation.configure({
+        distanceFilter: 1, // Meters
+        desiredAccuracy: {
+          ios: 'best',
+          android: 'highAccuracy',
+        },
+        // Android only
+        androidProvider: 'auto',
+        interval: 1000, // Milliseconds
+        fastestInterval: 500, // Milliseconds
+        maxWaitTime: 0, // Milliseconds
+      });
+      let locationSubscription = null;
+      let locationTimeout = null;
 
-    ReactNativeForegroundService.add_task(
-      () => {
-        RNLocation.requestPermission({
-          ios: 'whenInUse',
-          android: {
-            detail: 'fine',
-          },
-        }).then(granted => {
-          if (granted) {
-            locationSubscription && locationSubscription();
-            locationSubscription = RNLocation.subscribeToLocationUpdates(
-              async ([locations]) => {
-                locationSubscription();
-                locationTimeout && clearTimeout(locationTimeout);
-                const counter = this.state.isRunningGeo + 1;
-                this.setState({
-                  isRunningGeo: counter,
-                  location: {
-                    latitude: locations.latitude,
-                    longitude: locations.longitude,
-                    heading: locations.course,
-                  },
-                  speed: Math.round(locations.speed * 3.6 * 10) / 10,
-                  nearestRadar: await this.getNearestRadar({
-                    latitude: locations.latitude,
-                    longitude: locations.longitude,
-                  }),
-                });
-
-                if (this.state.isTracker) {
+      ReactNativeForegroundService.add_task(
+        () => {
+          RNLocation.requestPermission({
+            ios: 'whenInUse',
+            android: {
+              detail: 'fine',
+            },
+          }).then(granted => {
+            if (granted) {
+              locationSubscription && locationSubscription();
+              locationSubscription = RNLocation.subscribeToLocationUpdates(
+                async ([locations]) => {
+                  locationSubscription();
+                  locationTimeout && clearTimeout(locationTimeout);
+                  const counter = this.state.isRunningGeo + 1;
                   this.setState({
-                    region: {
+                    isRunningGeo: counter,
+                    location: {
                       latitude: locations.latitude,
                       longitude: locations.longitude,
-                      latitudeDelta: 0.005,
-                      longitudeDelta:
-                        (0.005 * Dimensions.get('window').width) /
-                        Dimensions.get('window').height,
+                      heading: locations.course,
                     },
+                    speed: Math.round(locations.speed * 3.6 * 10) / 10,
+                    nearestRadar: await this.getNearestRadar({
+                      latitude: locations.latitude,
+                      longitude: locations.longitude,
+                    }),
                   });
-                }
-              },
+
+                  if (this.state.isTracker) {
+                    this.setState({
+                      region: {
+                        latitude: locations.latitude,
+                        longitude: locations.longitude,
+                        latitudeDelta: 0.005,
+                        longitudeDelta:
+                          (0.005 * Dimensions.get('window').width) /
+                          Dimensions.get('window').height,
+                      },
+                    });
+                  }
+                },
+              );
+            } else {
+              locationSubscription && locationSubscription();
+              locationTimeout && clearTimeout(locationTimeout);
+              console.log('no permissions to obtain location');
+            }
+          });
+        },
+        {
+          delay: 1000,
+          onLoop: true,
+          taskId: 144,
+          onError: e => console.log('Error logging:', e),
+        },
+      );
+
+      await PushNotification.channelExists(
+        'rn-push-notification-channel-id-ding-4-300',
+        async isExist => {
+          if (isExist) {
+            PushNotification.deleteChannel(
+              'rn-push-notification-channel-id-ding-4-300',
             );
-          } else {
-            locationSubscription && locationSubscription();
-            locationTimeout && clearTimeout(locationTimeout);
-            console.log('no permissions to obtain location');
           }
-        });
-      },
-      {
-        delay: 1000,
-        onLoop: true,
-        taskId: 144,
-        onError: e => console.log('Error logging:', e),
-      },
-    );
 
-    ReactNativeForegroundService.start({
-      id: 144,
-      title: 'Speeding',
-      message: 'Отслеживает радары!',
-    });
+          await PushNotification.createChannel(
+            {
+              channelId: 'rn-push-notification-channel-id-ding-4-300', // (required)
+              channelName: 'Notification Alert', // (required)
+              playSound: true,
+              soundName: 'ding',
+            },
+            created => console.log(`createChannel returned '${created}'`), // (optional) callback returns whether the channel was created, false means it already existed.
+          );
+        },
+      );
 
-    BackHandler.addEventListener('hardwareBackPress', () => true);
+      ReactNativeForegroundService.start({
+        id: 144,
+        title: 'Speeding отслеживает радары...',
+        message:
+          'Приложение проверяет местоположение, чтобы предупреждать Вас о радарах',
+      });
+
+      BackHandler.addEventListener('hardwareBackPress', () => true);
+    } catch (e) {
+      console.warn(e);
+    }
   }
 
   onPressTrackingCursor() {
@@ -605,6 +646,17 @@ class App extends React.Component {
 
     BackHandler.removeEventListener('hardwareBackPress', () => true);
     BackHandler.exitApp();
+
+    await PushNotification.channelExists(
+      'rn-push-notification-channel-id-ding-4-300',
+      async isExist => {
+        if (isExist) {
+          PushNotification.deleteChannel(
+            'rn-push-notification-channel-id-ding-4-300',
+          );
+        }
+      },
+    );
 
     return ReactNativeForegroundService.stop();
   }
